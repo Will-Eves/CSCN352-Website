@@ -20,6 +20,10 @@ import getpass
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import Config
 
+# Apply MD4 patch for Python 3.10+ / OpenSSL 3 environments before importing ldap3
+from md4_patch import apply_md4_patch
+apply_md4_patch()
+
 try:
     from ldap3 import Server, Connection, ALL, SUBTREE, NTLM, SIMPLE, Tls
     from ldap3.core.exceptions import LDAPException, LDAPSocketOpenError, LDAPBindError

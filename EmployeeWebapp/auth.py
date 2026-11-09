@@ -5,6 +5,10 @@ LDAP authentication and Flask-Login initialisation for Rage N Raze.
 import logging
 import ssl
 
+# Ensure MD4 hash algorithm is available for NTLM under Python 3.10+ / OpenSSL 3
+from md4_patch import apply_md4_patch
+apply_md4_patch()
+
 from flask import current_app
 from flask_login import LoginManager
 from ldap3 import ALL, Connection, Server, NTLM, SIMPLE, Tls
