@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Categories{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Manage Categories</h1>
+
+<div class="category-sections">
+
+  <!-- ========== HARDWARE CATEGORIES ========== -->
+  <div class="card">
+    <div class="card-title d-flex justify-between items-center">
+      Hardware Categories
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('addCatType').value='hardware'; openModal('addCategoryModal')">＋ Add</button>
+    </div>
+
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cat in hardware_categories %}
+          <tr>
+            <td><strong>{{ cat.name }}</strong></td>
+            <td class="text-muted">{{ cat.description or '—' }}</td>
+            <td>
+              {% if cat.is_active %}
+              <span class="badge badge-active">Active</span>
+              {% else %}
+              <span class="badge badge-retired">Inactive</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="d-flex gap-sm">
+                <button class="btn btn-secondary btn-sm"
+                        onclick="openEditCategoryModal('{{ cat.id }}', '{{ cat.name }}', '{{ cat.description or '' }}')">
+                  ✏️ Edit
+                </button>
+                <form method="POST" action="{{ url_for('categories.category_toggle', cat_id=cat.id) }}" style="display:inline;">
+                  {% if cat.is_active %}
+                  <button type="submit" class="btn btn-danger btn-sm">Deactivate</button>
+                  {% else %}
+                  <button type="submit" class="btn btn-primary btn-sm">Activate</button>
+                  {% endif %}
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+          {% if not hardware_categories %}
+          <tr>
+            <td colspan="4" class="text-muted" style="text-align:center;padding:24px;">No hardware categories</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========== SOFTWARE CATEGORIES ========== -->
+  <div class="card">
+    <div class="card-title d-flex justify-between items-center">
+      Software Categories
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('addCatType').value='software'; openModal('addCategoryModal')">＋ Add</button>
+    </div>
+
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cat in software_categories %}
+          <tr>
+            <td><strong>{{ cat.name }}</strong></td>
+            <td class="text-muted">{{ cat.description or '—' }}</td>
+            <td>
+              {% if cat.is_active %}
+              <span class="badge badge-active">Active</span>
+              {% else %}
+              <span class="badge badge-retired">Inactive</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="d-flex gap-sm">
+                <button class="btn btn-secondary btn-sm"
+                        onclick="openEditCategoryModal('{{ cat.id }}', '{{ cat.name }}', '{{ cat.description or '' }}')">
+                  ✏️ Edit
+                </button>
+                <form method="POST" action="{{ url_for('categories.category_toggle', cat_id=cat.id) }}" style="display:inline;">
+                  {% if cat.is_active %}
+                  <button type="submit" class="btn btn-danger btn-sm">Deactivate</button>
+                  {% else %}
+                  <button type="submit" class="btn btn-primary btn-sm">Activate</button>
+                  {% endif %}
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+          {% if not software_categories %}
+          <tr>
+            <td colspan="4" class="text-muted" style="text-align:center;padding:24px;">No software categories</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- ========== ADD CATEGORY MODAL ========== -->
+<div class="modal-overlay" id="addCategoryModal">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModal('addCategoryModal')">&times;</button>
+    <h2>Add Category</h2>
+
+    <form method="POST" action="{{ url_for('categories.category_add') }}" data-validate>
+      <div class="form-group">
+        <label for="cat_name">Name *</label>
+        <input type="text" id="cat_name" name="name" required>
+      </div>
+
+      <div class="form-group">
+        <label for="cat_type">Type</label>
+        <select id="addCatType" name="asset_type">
+          <option value="hardware">Hardware</option>
+          <option value="software">Software</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="cat_desc">Description</label>
+        <textarea id="cat_desc" name="description" rows="2" placeholder="Optional description…"></textarea>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('addCategoryModal')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Category</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ========== EDIT CATEGORY MODAL ========== -->
+<div class="modal-overlay" id="editCategoryModal">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModal('editCategoryModal')">&times;</button>
+    <h2>Edit Category</h2>
+
+    <form method="POST" id="editCategoryForm" action="#" data-validate>
+      <div class="form-group">
+        <label for="edit_cat_name">Name *</label>
+        <input type="text" id="edit_cat_name" name="name" required>
+      </div>
+
+      <div class="form-group">
+        <label for="edit_cat_desc">Description</label>
+        <textarea id="edit_cat_desc" name="description" rows="2"></textarea>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('editCategoryModal')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block title %}Software Assets{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Software Assets</h1>
+
+<!-- ========== TOOLBAR ========== -->
+<div class="toolbar">
+  <form method="GET" action="{{ url_for('assets.software_list') }}" class="search-box">
+    <input type="search" name="q" placeholder="Search software…" value="{{ request.args.get('q', '') }}">
+  </form>
+
+  <form method="GET" action="{{ url_for('assets.software_list') }}" id="softwareFilterForm" style="display:contents;">
+    <input type="hidden" name="q" value="{{ request.args.get('q', '') }}">
+
+    <select name="status" onchange="this.form.submit()">
+      <option value="">All Statuses</option>
+      <option value="Active" {% if request.args.get('status') == 'Active' %}selected{% endif %}>Active</option>
+      <option value="Expired" {% if request.args.get('status') == 'Expired' %}selected{% endif %}>Expired</option>
+      <option value="Retired" {% if request.args.get('status') == 'Retired' %}selected{% endif %}>Retired</option>
+    </select>
+
+    <select name="category" onchange="this.form.submit()">
+      <option value="">All Categories</option>
+      {% for cat in categories %}
+      <option value="{{ cat.id }}" {% if request.args.get('category')|string == cat.id|string %}selected{% endif %}>{{ cat.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  {% if current_user.role in ['technician', 'admin'] %}
+  <button class="btn btn-primary" onclick="openModal('addSoftwareModal')">＋ Add Software</button>
+  {% endif %}
+</div>
+
+<!-- ========== TABLE ========== -->
+<div class="table-wrapper">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th data-sort="tag">Asset Tag</th>
+        <th data-sort="name">Name</th>
+        <th data-sort="version">Version</th>
+        <th data-sort="vendor">Vendor</th>
+        <th data-sort="license">License Type</th>
+        <th data-sort="seats">Seats</th>
+        <th data-sort="status">Status</th>
+        <th data-sort="assigned">Assigned To</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for asset in assets.items %}
+      <tr class="clickable-row" onclick="window.location='{{ url_for('assets.software_detail', asset_id=asset.id) }}'">
+        <td><strong>{{ asset.asset_tag }}</strong></td>
+        <td>{{ asset.name }}</td>
+        <td class="text-muted">{{ asset.version or '—' }}</td>
+        <td class="text-muted">{{ asset.vendor or '—' }}</td>
+        <td>{{ asset.license_type or '—' }}</td>
+        <td data-sort-value="{{ asset.used_seats|default(0) }}">
+          {% if asset.total_seats %}
+            {{ asset.used_seats|default(0) }} / {{ asset.total_seats }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>
+          {% set status_class = asset.status|lower|replace(' ', '-') %}
+          <span class="badge badge-{{ status_class }}">{{ asset.status }}</span>
+        </td>
+        <td>{{ asset.assigned_to or '—' }}</td>
+      </tr>
+      {% endfor %}
+      {% if not assets.items %}
+      <tr>
+        <td colspan="8" class="text-muted" style="text-align:center;padding:32px;">
+          No software assets found
+        </td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ========== PAGINATION ========== -->
+{% if assets.pages > 1 %}
+<nav class="pagination">
+  {% if assets.has_prev %}
+  <a href="{{ url_for('assets.software_list', page=assets.prev_num, q=request.args.get('q',''), status=request.args.get('status',''), category=request.args.get('category','')) }}">‹ Prev</a>
+  {% else %}
+  <span class="disabled">‹ Prev</span>
+  {% endif %}
+
+  {% for page_num in assets.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+    {% if page_num %}
+      {% if page_num == assets.page %}
+      <span class="active">{{ page_num }}</span>
+      {% else %}
+      <a href="{{ url_for('assets.software_list', page=page_num, q=request.args.get('q',''), status=request.args.get('status',''), category=request.args.get('category','')) }}">{{ page_num }}</a>
+      {% endif %}
+    {% else %}
+      <span class="ellipsis">…</span>
+    {% endif %}
+  {% endfor %}
+
+  {% if assets.has_next %}
+  <a href="{{ url_for('assets.software_list', page=assets.next_num, q=request.args.get('q',''), status=request.args.get('status',''), category=request.args.get('category','')) }}">Next ›</a>
+  {% else %}
+  <span class="disabled">Next ›</span>
+  {% endif %}
+</nav>
+{% endif %}
+
+<!-- ========== ADD SOFTWARE MODAL ========== -->
+{% if current_user.role in ['technician', 'admin'] %}
+<div class="modal-overlay" id="addSoftwareModal">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModal('addSoftwareModal')">&times;</button>
+    <h2>Add Software Asset</h2>
+
+    <form method="POST" action="{{ url_for('assets.software_add') }}" data-validate>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="sw_name">Name *</label>
+          <input type="text" id="sw_name" name="name" required>
+        </div>
+        <div class="form-group">
+          <label for="sw_version">Version</label>
+          <input type="text" id="sw_version" name="version">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="sw_vendor">Vendor</label>
+          <input type="text" id="sw_vendor" name="vendor">
+        </div>
+        <div class="form-group">
+          <label for="sw_license_key">License Key</label>
+          <input type="text" id="sw_license_key" name="license_key">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="sw_license_type">License Type</label>
+          <select id="sw_license_type" name="license_type">
+            <option value="">— Select —</option>
+            <option value="Per Seat">Per Seat</option>
+            <option value="Per Device">Per Device</option>
+            <option value="Site License">Site License</option>
+            <option value="Open Source">Open Source</option>
+            <option value="Subscription">Subscription</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="sw_total_seats">Total Seats</label>
+          <input type="number" id="sw_total_seats" name="total_seats" min="0">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="sw_category">Category</label>
+          <select id="sw_category" name="category_id">
+            <option value="">— Select —</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}">{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="sw_status">Status</label>
+          <select id="sw_status" name="status">
+            <option value="Active">Active</option>
+            <option value="Expired">Expired</option>
+            <option value="Retired">Retired</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="sw_assigned">Assigned To</label>
+        <input type="text" id="sw_assigned" name="assigned_to" placeholder="Employee name or username">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="sw_purchase_date">Purchase Date</label>
+          <input type="date" id="sw_purchase_date" name="purchase_date">
+        </div>
+        <div class="form-group">
+          <label for="sw_expiry_date">Expiry Date</label>
+          <input type="date" id="sw_expiry_date" name="expiry_date">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="sw_notes">Notes</label>
+        <textarea id="sw_notes" name="notes" rows="3" placeholder="Optional notes…"></textarea>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('addSoftwareModal')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Software</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
