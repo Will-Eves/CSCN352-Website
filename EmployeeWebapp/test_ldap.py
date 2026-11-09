@@ -2,11 +2,7 @@
 Rage N Raze — LDAP & Active Directory Diagnostic Tool
 =====================================================
 Run this script directly in PowerShell/CMD on your server to troubleshoot
-LDAP connectivity, domain bindings, user searches, and group role mapping.
-
-Usage:
-    python test_ldap.py
-    python test_ldap.py --user Administrator --password YourPassword
+Windows Domain & Active Directory connectivity, logins, and role mapping.
 """
 
 import sys
@@ -15,6 +11,9 @@ import socket
 import ssl
 import argparse
 import getpass
+import subprocess
+import ctypes
+from ctypes import wintypes
 
 # Add current dir to path to import config
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -28,12 +27,95 @@ try:
     from ldap3 import Server, Connection, ALL, SUBTREE, NTLM, SIMPLE, Tls
     from ldap3.core.exceptions import LDAPException, LDAPSocketOpenError, LDAPBindError
 except ImportError:
-    print("[ERROR] ldap3 is not installed. Run: pip install ldap3")
-    sys.exit(1)
+    pass
+
+
+def test_windows_native_logon(domain: str, username: str, password: str, admin_grp: str, tech_grp: str):
+    """Test authentication directly through Windows LSA (Advapi32.dll LogonUserW).
+
+    This uses the native Windows Operating System security channel, completely bypassing
+    LDAP port 389 signing and SSL requirements.
+    """
+    print(f"\n[*] Testing Native Windows Domain Logon (Advapi32.dll LogonUserW) ...")
+    LOGON32_LOGON_NETWORK = 3
+    LOGON32_PROVIDER_DEFAULT = 0
+
+    token = wintypes.HANDLE()
+    advapi32 = ctypes.windll.advapi32
+    kernel32 = ctypes.windll.kernel32
+
+    clean_user = username.split("\\")[-1] if "\\" in username else username
+    clean_domain = domain.strip()
+
+    success = advapi32.LogonUserW(
+        clean_user,
+        clean_domain,
+        password,
+        LOGON32_LOGON_NETWORK,
+        LOGON32_PROVIDER_DEFAULT,
+        ctypes.byref(token),
+    )
+
+    if not success:
+        err = ctypes.GetLastError()
+        print(f"  [FAIL] Windows Native Logon Failed. Error code: {err}")
+        if err == 1326:
+            print("  --> HINT (1326): Invalid username or password.")
+        elif err == 1327:
+            print("  --> HINT (1327): User account restriction (e.g. blank password).")
+        elif err == 1909:
+            print("  --> HINT (1909): Account is locked out.")
+        return False
+
+    kernel32.CloseHandle(token)
+    print(f"  [OK] Windows Native Logon SUCCESSFUL for '{clean_domain}\\{clean_user}'!")
+
+    # Query groups using Windows net user
+    print(f"\n[*] Checking Active Directory Group Membership via Windows ...")
+    groups = []
+    full_name = clean_user
+    try:
+        cmd = ["net", "user", clean_user, "/domain"]
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
+        for line in out.splitlines():
+            if line.startswith("Full Name"):
+                val = line.replace("Full Name", "").strip()
+                if val:
+                    full_name = val
+            if "Group Memberships" in line or "Group memberships" in line:
+                parts = line.split("*")[1:]
+                for p in parts:
+                    clean_p = p.strip()
+                    if clean_p and clean_p.lower() != "none":
+                        groups.append(clean_p)
+    except Exception as e:
+        print(f"  [INFO] Note querying net user: {e}")
+
+    print(f"       Display Name: {full_name}")
+    print(f"       Groups Found ({len(groups)}):")
+    for g in groups:
+        print(f"         - {g}")
+
+    # Role evaluation
+    role = "viewer"
+    admin_targets = [admin_grp.upper(), "DOMAIN ADMINS", "ADMINISTRATORS"]
+    tech_targets = [tech_grp.upper()]
+
+    for g in groups:
+        g_up = g.upper()
+        if any(target in g_up for target in admin_targets):
+            role = "admin"
+            break
+        if any(target in g_up for target in tech_targets):
+            role = "technician"
+
+    print(f"\n  ==================================================")
+    print(f"  RESULT: User '{clean_user}' maps to role: [{role.upper()}]")
+    print(f"  ==================================================")
+    return True
 
 
 def parse_host_port(server_uri: str):
-    """Extract hostname and port from an ldap URI."""
     uri = server_uri.replace("ldap://", "").replace("ldaps://", "")
     if ":" in uri:
         host, port = uri.split(":", 1)
@@ -42,190 +124,35 @@ def parse_host_port(server_uri: str):
     return uri, port
 
 
-def test_tcp_connectivity(host: str, port: int) -> bool:
-    print(f"\n[1/4] Testing TCP network connectivity to {host}:{port} ...")
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5.0)
-        sock.connect((host, port))
-        sock.close()
-        print(f"  [OK] Successfully established TCP connection to {host}:{port}")
-        return True
-    except socket.gaierror as e:
-        print(f"  [FAIL] DNS resolution failed for '{host}': {e}")
-        print("  --> HINT: Check if the hostname is spelled correctly in config.py or use an IP address.")
-        return False
-    except socket.timeout:
-        print(f"  [FAIL] Connection to {host}:{port} timed out after 5 seconds.")
-        print("  --> HINT: Check Windows Firewall on the DC (port 389 must be open).")
-        return False
-    except Exception as e:
-        print(f"  [FAIL] Could not connect to {host}:{port}: {e}")
-        return False
-
-
-def test_ldap_bind(server_uri: str, domain: str, username: str, password: str):
-    print(f"\n[2/4] Testing LDAP bind for user '{domain}\\{username}' ...")
-    bind_dn = f"{domain}\\{username}"
-    is_ssl = server_uri.lower().startswith("ldaps://") or ":636" in server_uri
-    tls_config = Tls(validate=ssl.CERT_NONE) if is_ssl else None
-
-    # Try NTLM first (Windows Active Directory standard)
-    print("  -> Attempting NTLM authentication (Windows challenge-response)...")
-    try:
-        server = Server(server_uri, use_ssl=is_ssl, tls=tls_config, get_info=ALL)
-        conn = Connection(server, user=bind_dn, password=password, authentication=NTLM, auto_bind=True)
-        print(f"  [OK] NTLM LDAP Bind Successful! Authenticated as: {bind_dn}")
-        return conn, server
-    except LDAPBindError as e:
-        print(f"  [INFO] NTLM bind did not succeed: {e}")
-    except Exception as e:
-        print(f"  [INFO] NTLM connection notice: {e}")
-
-    # Fallback to SIMPLE bind
-    print("  -> Attempting SIMPLE authentication...")
-    try:
-        server = Server(server_uri, use_ssl=is_ssl, tls=tls_config, get_info=ALL)
-        conn = Connection(server, user=bind_dn, password=password, authentication=SIMPLE, auto_bind=True)
-        print(f"  [OK] SIMPLE LDAP Bind Successful! Authenticated as: {bind_dn}")
-        return conn, server
-    except LDAPBindError as e:
-        print(f"  [FAIL] LDAP Bind Error: {e}")
-        err_str = str(e)
-        if "strongerAuthRequired" in err_str:
-            print("\n  [CRITICAL] 'strongerAuthRequired' detected!")
-            print("  Active Directory is blocking unencrypted simple binds over port 389.")
-            print("  Solutions:")
-            print("    1. Use NTLM authentication (updated in this script and auth.py).")
-            print("    2. Or connect using LDAPS over port 636: ldaps://<ip>:636")
-        elif "data 52e" in err_str or "invalidCredentials" in err_str:
-            print("  --> HINT: Invalid credentials (wrong password, or domain name does not match).")
-        elif "data 525" in err_str:
-            print("  --> HINT: User not found in domain.")
-        elif "data 532" in err_str:
-            print("  --> HINT: Password has expired.")
-        elif "data 533" in err_str:
-            print("  --> HINT: User account is disabled.")
-        elif "data 775" in err_str:
-            print("  --> HINT: User account is locked out.")
-        return None, None
-    except Exception as e:
-        print(f"  [FAIL] Unexpected error during bind: {e}")
-        return None, None
-
-
-def test_user_search(conn, search_base: str, username: str, admin_grp: str, tech_grp: str):
-    print(f"\n[3/4] Searching for user attributes in '{search_base}' ...")
-    search_filter = f"(sAMAccountName={username})"
-
-    try:
-        conn.search(
-            search_base=search_base,
-            search_filter=search_filter,
-            search_scope=SUBTREE,
-            attributes=["displayName", "mail", "sAMAccountName", "memberOf", "distinguishedName"],
-        )
-
-        if not conn.entries:
-            print(f"  [WARN] User '{username}' authenticated, but search returned 0 results in: '{search_base}'")
-            # Try searching the base domain root
-            domain_root = ",".join([part for part in search_base.split(",") if part.upper().startswith("DC=")])
-            if domain_root and domain_root != search_base:
-                print(f"  -> Retrying search at domain root '{domain_root}' ...")
-                conn.search(
-                    search_base=domain_root,
-                    search_filter=search_filter,
-                    search_scope=SUBTREE,
-                    attributes=["displayName", "mail", "sAMAccountName", "memberOf", "distinguishedName"],
-                )
-
-        if not conn.entries:
-            print("  [WARN] No user object found. User will default to 'viewer' role upon login.")
-            return
-
-        entry = conn.entries[0]
-        print(f"  [OK] User Found: {entry.distinguishedName}")
-        print(f"       Display Name: {getattr(entry, 'displayName', 'None')}")
-        print(f"       Email:        {getattr(entry, 'mail', 'None')}")
-
-        # Test group membership
-        print(f"\n[4/4] Checking group memberships for role mapping ...")
-        member_of_raw = entry.memberOf.values if hasattr(entry, "memberOf") and entry.memberOf else []
-        member_of = [str(g) for g in member_of_raw]
-
-        print(f"       Groups user belongs to ({len(member_of)}):")
-        for g in member_of:
-            print(f"         - {g}")
-
-        role = "viewer"
-        for group_dn in member_of:
-            group_dn_upper = group_dn.upper()
-            if f"CN={admin_grp}".upper() in group_dn_upper:
-                role = "admin"
-                break
-            if f"CN={tech_grp}".upper() in group_dn_upper:
-                role = "technician"
-
-        print(f"\n  ==================================================")
-        print(f"  RESULT: User '{username}' maps to role: [{role.upper()}]")
-        print(f"  ==================================================")
-        if role == "viewer":
-            print(f"  Note: To give this user admin rights, add them to group '{admin_grp}' in Active Directory,")
-            print(f"        or promote them via the webapp's Admin Panel.")
-
-    except LDAPException as e:
-        print(f"  [FAIL] Search error: {e}")
-
-
 def main():
-    parser = argparse.ArgumentParser(description="Test and diagnose Active Directory LDAP connectivity.")
-    parser.add_argument("--server", default=Config.LDAP_SERVER, help=f"LDAP Server URI (default: {Config.LDAP_SERVER})")
-    parser.add_argument("--domain", default=Config.LDAP_DOMAIN, help=f"NetBIOS Domain (default: {Config.LDAP_DOMAIN})")
-    parser.add_argument("--search-base", default=Config.LDAP_USER_SEARCH_BASE, help=f"User search base (default: {Config.LDAP_USER_SEARCH_BASE})")
-    parser.add_argument("--user", help="Username to test (without domain)")
+    parser = argparse.ArgumentParser(description="Test and diagnose Active Directory connectivity.")
+    parser.add_argument("--server", default=Config.LDAP_SERVER)
+    parser.add_argument("--domain", default=Config.LDAP_DOMAIN)
+    parser.add_argument("--search-base", default=Config.LDAP_USER_SEARCH_BASE)
+    parser.add_argument("--user", help="Username to test")
     parser.add_argument("--password", help="Password for user")
     args = parser.parse_args()
 
     print("==================================================")
-    print("   RAGE N RAZE — LDAP ACTIVE DIRECTORY DIAGNOSTIC ")
+    print("   RAGE N RAZE — WINDOWS ACTIVE DIRECTORY DIAGNOSTIC ")
     print("==================================================")
-    print(f" Current Configuration (from config.py / env):")
+    print(f" Current Configuration:")
     print(f"   LDAP_SERVER:           {args.server}")
     print(f"   LDAP_DOMAIN:           {args.domain}")
     print(f"   LDAP_USER_SEARCH_BASE: {args.search_base}")
     print(f"   LDAP_ADMIN_GROUP:      {Config.LDAP_ADMIN_GROUP}")
     print(f"   LDAP_TECH_GROUP:       {Config.LDAP_TECH_GROUP}")
-    print(f"   LDAP_VIEWER_GROUP:     {Config.LDAP_VIEWER_GROUP}")
 
-    username = args.user
+    username = args.user or input("\nEnter Windows Domain Username (e.g. Administrator): ").strip()
     if not username:
-        username = input("\nEnter Windows Domain Username (e.g. Administrator): ").strip()
-    if not username:
-        print("Username is required.")
         return
+    password = args.password or getpass.getpass(f"Enter password for {args.domain}\\{username}: ")
 
-    password = args.password
-    if not password:
-        password = getpass.getpass(f"Enter password for {args.domain}\\{username}: ")
-
-    host, port = parse_host_port(args.server)
-
-    # Step 1: TCP Port
-    if not test_tcp_connectivity(host, port):
-        return
-
-    # Step 2: Bind
-    conn, server = test_ldap_bind(args.server, args.domain, username, password)
-    if not conn:
-        return
-
-    # Step 3 & 4: Search & Role Mapping
-    test_user_search(conn, args.search_base, username, Config.LDAP_ADMIN_GROUP, Config.LDAP_TECH_GROUP)
-
-    try:
-        conn.unbind()
-    except Exception:
-        pass
+    # 1. First test native Windows Domain Logon (Works on Windows Server 2025 out of the box)
+    if os.name == "nt":
+        if test_windows_native_logon(args.domain, username, password, Config.LDAP_ADMIN_GROUP, Config.LDAP_TECH_GROUP):
+            print("\n>> NATIVE WINDOWS AUTHENTICATION IS WORKING PERFECTLY! <<")
+            return
 
 
 if __name__ == "__main__":
