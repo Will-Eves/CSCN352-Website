@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Dashboard</h1>
+
+<!-- ========== STATS ROW ========== -->
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-icon">🖥️</div>
+    <div>
+      <div class="stat-number">{{ total_hardware }}</div>
+      <div class="stat-label">Hardware Assets</div>
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-icon">💿</div>
+    <div>
+      <div class="stat-number">{{ total_software }}</div>
+      <div class="stat-label">Software Assets</div>
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-icon">📤</div>
+    <div>
+      <div class="stat-number">{{ deployed_hardware }}</div>
+      <div class="stat-label">Deployed Hardware</div>
+    </div>
+  </div>
+
+  <div class="stat-card">
+    <div class="stat-icon">✅</div>
+    <div>
+      <div class="stat-number">{{ active_software }}</div>
+      <div class="stat-label">Active Licenses</div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== STATUS BREAKDOWN ========== -->
+<div class="two-col">
+  <div class="card">
+    <div class="card-title">Hardware by Status</div>
+    <ul class="status-list">
+      {% for status, count in hardware_by_status.items() %}
+      <li>
+        <span class="status-name">
+          <span class="status-dot" style="background:
+            {% if status == 'Deployed' %}#22c55e
+            {% elif status == 'In Stock' %}#3b82f6
+            {% elif status == 'In Repair' %}#f59e0b
+            {% elif status == 'Retired' %}#ef4444
+            {% else %}#b8b8b5
+            {% endif %};"></span>
+          {{ status }}
+        </span>
+        <span class="status-count">{{ count }}</span>
+      </li>
+      {% endfor %}
+      {% if not hardware_by_status %}
+      <li><span class="text-muted">No hardware assets yet</span></li>
+      {% endif %}
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Software by Status</div>
+    <ul class="status-list">
+      {% for status, count in software_by_status.items() %}
+      <li>
+        <span class="status-name">
+          <span class="status-dot" style="background:
+            {% if status == 'Active' %}#22c55e
+            {% elif status == 'Expired' %}#ef4444
+            {% elif status == 'Retired' %}#ef4444
+            {% else %}#b8b8b5
+            {% endif %};"></span>
+          {{ status }}
+        </span>
+        <span class="status-count">{{ count }}</span>
+      </li>
+      {% endfor %}
+      {% if not software_by_status %}
+      <li><span class="text-muted">No software assets yet</span></li>
+      {% endif %}
+    </ul>
+  </div>
+</div>
+
+<!-- ========== RECENT ACTIVITY ========== -->
+<div class="card">
+  <div class="card-title">Recent Activity</div>
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>User</th>
+          <th>Action</th>
+          <th>Type</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in recent_logs %}
+        <tr>
+          <td class="text-muted">{{ log.timestamp.strftime('%b %d, %Y %I:%M %p') }}</td>
+          <td>{{ log.user or 'System' }}</td>
+          <td>
+            <span class="{% if log.action == 'CREATE' %}action-create{% elif log.action == 'UPDATE' %}action-update{% elif log.action == 'DELETE' %}action-delete{% endif %}">
+              {{ log.action }}
+            </span>
+          </td>
+          <td>{{ log.entity_type }}</td>
+          <td class="text-muted">{{ log.details }}</td>
+        </tr>
+        {% endfor %}
+        {% if not recent_logs %}
+        <tr>
+          <td colspan="5" class="text-muted" style="text-align:center;padding:24px;">No recent activity</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

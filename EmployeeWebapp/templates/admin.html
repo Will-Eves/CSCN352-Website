@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}User Management{% endblock %}
+
+{% block content %}
+<h1 class="page-title">User Management</h1>
+
+<div class="admin-note">
+  ℹ️ Users are automatically added when they first log in via LDAP. Use this panel to adjust their roles and account status.
+</div>
+
+<div class="card">
+  <div class="card-title">All Users</div>
+
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th data-sort="username">Username</th>
+          <th data-sort="display">Display Name</th>
+          <th data-sort="email">Email</th>
+          <th data-sort="role">Role</th>
+          <th data-sort="status">Status</th>
+          <th data-sort="login">Last Login</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td><strong>{{ user.username }}</strong></td>
+          <td>{{ user.display_name }}</td>
+          <td class="text-muted">{{ user.email or '—' }}</td>
+          <td>
+            <span class="badge badge-{{ user.role }}">{{ user.role }}</span>
+          </td>
+          <td>
+            {% if user.is_active %}
+            <span class="badge badge-active">Active</span>
+            {% else %}
+            <span class="badge badge-retired">Disabled</span>
+            {% endif %}
+          </td>
+          <td class="text-muted">
+            {{ user.last_login.strftime('%b %d, %Y %I:%M %p') if user.last_login else 'Never' }}
+          </td>
+          <td>
+            <div class="d-flex gap-sm items-center flex-wrap">
+              <!-- Role update form -->
+              <form method="POST" action="{{ url_for('admin_bp.update_user_role', user_id=user.id) }}" class="role-form">
+                <select name="role">
+                  <option value="viewer" {% if user.role == 'viewer' %}selected{% endif %}>Viewer</option>
+                  <option value="technician" {% if user.role == 'technician' %}selected{% endif %}>Technician</option>
+                  <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>Admin</option>
+                </select>
+                <button type="submit" class="btn btn-primary btn-sm">Update</button>
+              </form>
+
+              <!-- Toggle enable/disable -->
+              <form method="POST" action="{{ url_for('admin_bp.toggle_user_active', user_id=user.id) }}" style="display:inline;">
+                {% if user.is_active %}
+                <button type="submit" class="btn btn-danger btn-sm">Disable</button>
+                {% else %}
+                <button type="submit" class="btn btn-secondary btn-sm">Enable</button>
+                {% endif %}
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not users %}
+        <tr>
+          <td colspan="7" class="text-muted" style="text-align:center;padding:32px;">No users found</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

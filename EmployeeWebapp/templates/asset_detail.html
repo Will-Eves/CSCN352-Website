@@ -1,0 +1,345 @@
+{% extends "base.html" %}
+
+{% block title %}{{ asset.name }} — {{ asset_type|capitalize }}{% endblock %}
+
+{% block content %}
+
+<!-- ========== HEADER ========== -->
+<div class="detail-header">
+  <div class="detail-title-group">
+    <div class="asset-tag">{{ asset.asset_tag }}</div>
+    <h1>
+      {{ asset.name }}
+      {% set status_class = asset.status|lower|replace(' ', '-') %}
+      <span class="badge badge-{{ status_class }}">{{ asset.status }}</span>
+    </h1>
+  </div>
+
+  <div class="detail-actions">
+    {% if current_user.role in ['technician', 'admin'] %}
+    <button class="btn btn-secondary btn-sm" onclick="toggleEditMode()">✏️ Edit</button>
+    {% endif %}
+    {% if current_user.role == 'admin' %}
+    <button class="btn btn-danger btn-sm" onclick="confirmDelete('deleteAssetForm', '{{ asset.name }}')">🗑️ Delete</button>
+    <form id="deleteAssetForm" method="POST"
+          action="{{ url_for('assets.hardware_delete', asset_id=asset.id) if asset_type == 'hardware' else url_for('assets.software_delete', asset_id=asset.id) }}"
+          style="display:none;">
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ========== VIEW SECTION ========== -->
+<div class="view-section">
+  <div class="card">
+    <div class="card-title">Asset Details</div>
+    <div class="detail-grid">
+
+      <div class="detail-field">
+        <div class="field-label">Asset Tag</div>
+        <div class="field-value">{{ asset.asset_tag }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Name</div>
+        <div class="field-value">{{ asset.name }}</div>
+      </div>
+
+      {% if asset_type == 'hardware' %}
+      <div class="detail-field">
+        <div class="field-label">Manufacturer</div>
+        <div class="field-value">{{ asset.manufacturer or '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Model</div>
+        <div class="field-value">{{ asset.model or '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Serial Number</div>
+        <div class="field-value">{{ asset.serial_number or '—' }}</div>
+      </div>
+      {% endif %}
+
+      {% if asset_type == 'software' %}
+      <div class="detail-field">
+        <div class="field-label">Version</div>
+        <div class="field-value">{{ asset.version or '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Vendor</div>
+        <div class="field-value">{{ asset.vendor or '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">License Key</div>
+        <div class="field-value">{{ asset.license_key or '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">License Type</div>
+        <div class="field-value">{{ asset.license_type or '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Seats</div>
+        <div class="field-value">
+          {% if asset.total_seats %}
+            {{ asset.used_seats|default(0) }} / {{ asset.total_seats }}
+          {% else %}
+            —
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="detail-field">
+        <div class="field-label">Category</div>
+        <div class="field-value">{{ asset.category.name if asset.category else '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Status</div>
+        <div class="field-value">
+          {% set status_class = asset.status|lower|replace(' ', '-') %}
+          <span class="badge badge-{{ status_class }}">{{ asset.status }}</span>
+        </div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Assigned To</div>
+        <div class="field-value">{{ asset.assigned_to or '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Purchase Date</div>
+        <div class="field-value">{{ asset.purchase_date.strftime('%b %d, %Y') if asset.purchase_date else '—' }}</div>
+      </div>
+
+      {% if asset_type == 'hardware' %}
+      <div class="detail-field">
+        <div class="field-label">Warranty Expiry</div>
+        <div class="field-value">{{ asset.warranty_expiry.strftime('%b %d, %Y') if asset.warranty_expiry else '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Location</div>
+        <div class="field-value">{{ asset.location or '—' }}</div>
+      </div>
+      {% endif %}
+
+      {% if asset_type == 'software' %}
+      <div class="detail-field">
+        <div class="field-label">Expiry Date</div>
+        <div class="field-value">{{ asset.expiry_date.strftime('%b %d, %Y') if asset.expiry_date else '—' }}</div>
+      </div>
+      {% endif %}
+
+      <div class="detail-field">
+        <div class="field-label">Notes</div>
+        <div class="field-value">{{ asset.notes or '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Created By</div>
+        <div class="field-value">{{ asset.created_by or '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Created At</div>
+        <div class="field-value">{{ asset.created_at.strftime('%b %d, %Y %I:%M %p') if asset.created_at else '—' }}</div>
+      </div>
+
+      <div class="detail-field">
+        <div class="field-label">Updated At</div>
+        <div class="field-value">{{ asset.updated_at.strftime('%b %d, %Y %I:%M %p') if asset.updated_at else '—' }}</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ========== EDIT SECTION ========== -->
+{% if current_user.role in ['technician', 'admin'] %}
+<div class="edit-section">
+  <div class="card">
+    <div class="card-title">Edit Asset</div>
+
+    <form method="POST" data-validate
+          action="{{ url_for('assets.hardware_edit', asset_id=asset.id) if asset_type == 'hardware' else url_for('assets.software_edit', asset_id=asset.id) }}">
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edit_name">Name *</label>
+          <input type="text" id="edit_name" name="name" value="{{ asset.name }}" required>
+        </div>
+
+        {% if asset_type == 'hardware' %}
+        <div class="form-group">
+          <label for="edit_manufacturer">Manufacturer</label>
+          <input type="text" id="edit_manufacturer" name="manufacturer" value="{{ asset.manufacturer or '' }}">
+        </div>
+        {% endif %}
+
+        {% if asset_type == 'software' %}
+        <div class="form-group">
+          <label for="edit_version">Version</label>
+          <input type="text" id="edit_version" name="version" value="{{ asset.version or '' }}">
+        </div>
+        {% endif %}
+      </div>
+
+      {% if asset_type == 'hardware' %}
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edit_model">Model</label>
+          <input type="text" id="edit_model" name="model" value="{{ asset.model or '' }}">
+        </div>
+        <div class="form-group">
+          <label for="edit_serial">Serial Number</label>
+          <input type="text" id="edit_serial" name="serial_number" value="{{ asset.serial_number or '' }}">
+        </div>
+      </div>
+      {% endif %}
+
+      {% if asset_type == 'software' %}
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edit_vendor">Vendor</label>
+          <input type="text" id="edit_vendor" name="vendor" value="{{ asset.vendor or '' }}">
+        </div>
+        <div class="form-group">
+          <label for="edit_license_key">License Key</label>
+          <input type="text" id="edit_license_key" name="license_key" value="{{ asset.license_key or '' }}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edit_license_type">License Type</label>
+          <select id="edit_license_type" name="license_type">
+            <option value="">— Select —</option>
+            <option value="Per Seat" {% if asset.license_type == 'Per Seat' %}selected{% endif %}>Per Seat</option>
+            <option value="Per Device" {% if asset.license_type == 'Per Device' %}selected{% endif %}>Per Device</option>
+            <option value="Site License" {% if asset.license_type == 'Site License' %}selected{% endif %}>Site License</option>
+            <option value="Open Source" {% if asset.license_type == 'Open Source' %}selected{% endif %}>Open Source</option>
+            <option value="Subscription" {% if asset.license_type == 'Subscription' %}selected{% endif %}>Subscription</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edit_total_seats">Total Seats</label>
+          <input type="number" id="edit_total_seats" name="total_seats" min="0" value="{{ asset.total_seats or '' }}">
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edit_category">Category</label>
+          <select id="edit_category" name="category_id">
+            <option value="">— Select —</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}" {% if asset.category_id == cat.id %}selected{% endif %}>{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edit_status">Status</label>
+          <select id="edit_status" name="status">
+            {% if asset_type == 'hardware' %}
+            <option value="In Stock" {% if asset.status == 'In Stock' %}selected{% endif %}>In Stock</option>
+            <option value="Deployed" {% if asset.status == 'Deployed' %}selected{% endif %}>Deployed</option>
+            <option value="In Repair" {% if asset.status == 'In Repair' %}selected{% endif %}>In Repair</option>
+            <option value="Retired" {% if asset.status == 'Retired' %}selected{% endif %}>Retired</option>
+            {% else %}
+            <option value="Active" {% if asset.status == 'Active' %}selected{% endif %}>Active</option>
+            <option value="Expired" {% if asset.status == 'Expired' %}selected{% endif %}>Expired</option>
+            <option value="Retired" {% if asset.status == 'Retired' %}selected{% endif %}>Retired</option>
+            {% endif %}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="edit_assigned">Assigned To</label>
+        <input type="text" id="edit_assigned" name="assigned_to" value="{{ asset.assigned_to or '' }}">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edit_purchase_date">Purchase Date</label>
+          <input type="date" id="edit_purchase_date" name="purchase_date"
+                 value="{{ asset.purchase_date.strftime('%Y-%m-%d') if asset.purchase_date else '' }}">
+        </div>
+        <div class="form-group">
+          {% if asset_type == 'hardware' %}
+          <label for="edit_warranty">Warranty Expiry</label>
+          <input type="date" id="edit_warranty" name="warranty_expiry"
+                 value="{{ asset.warranty_expiry.strftime('%Y-%m-%d') if asset.warranty_expiry else '' }}">
+          {% else %}
+          <label for="edit_expiry">Expiry Date</label>
+          <input type="date" id="edit_expiry" name="expiry_date"
+                 value="{{ asset.expiry_date.strftime('%Y-%m-%d') if asset.expiry_date else '' }}">
+          {% endif %}
+        </div>
+      </div>
+
+      {% if asset_type == 'hardware' %}
+      <div class="form-group">
+        <label for="edit_location">Location</label>
+        <input type="text" id="edit_location" name="location" value="{{ asset.location or '' }}">
+      </div>
+      {% endif %}
+
+      <div class="form-group">
+        <label for="edit_notes">Notes</label>
+        <textarea id="edit_notes" name="notes" rows="3">{{ asset.notes or '' }}</textarea>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="toggleEditMode()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<!-- ========== AUDIT TRAIL ========== -->
+<div class="card">
+  <div class="card-title">Audit Trail</div>
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>User</th>
+          <th>Action</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+        <tr>
+          <td class="text-muted">{{ log.timestamp.strftime('%b %d, %Y %I:%M %p') }}</td>
+          <td>{{ log.user or 'System' }}</td>
+          <td>
+            <span class="{% if log.action == 'CREATE' %}action-create{% elif log.action == 'UPDATE' %}action-update{% elif log.action == 'DELETE' %}action-delete{% endif %}">
+              {{ log.action }}
+            </span>
+          </td>
+          <td class="text-muted">{{ log.details }}</td>
+        </tr>
+        {% endfor %}
+        {% if not logs %}
+        <tr>
+          <td colspan="4" class="text-muted" style="text-align:center;padding:24px;">No audit records</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

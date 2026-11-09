@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block title %}Hardware Assets{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Hardware Assets</h1>
+
+<!-- ========== TOOLBAR ========== -->
+<div class="toolbar">
+  <form method="GET" action="{{ url_for('assets.hardware_list') }}" class="search-box">
+    <input type="search" name="q" placeholder="Search hardware…" value="{{ request.args.get('q', '') }}">
+  </form>
+
+  <form method="GET" action="{{ url_for('assets.hardware_list') }}" id="hardwareFilterForm" style="display:contents;">
+    <!-- preserve search query -->
+    <input type="hidden" name="q" value="{{ request.args.get('q', '') }}">
+
+    <select name="status" onchange="this.form.submit()">
+      <option value="">All Statuses</option>
+      <option value="In Stock" {% if request.args.get('status') == 'In Stock' %}selected{% endif %}>In Stock</option>
+      <option value="Deployed" {% if request.args.get('status') == 'Deployed' %}selected{% endif %}>Deployed</option>
+      <option value="In Repair" {% if request.args.get('status') == 'In Repair' %}selected{% endif %}>In Repair</option>
+      <option value="Retired" {% if request.args.get('status') == 'Retired' %}selected{% endif %}>Retired</option>
+    </select>
+
+    <select name="category" onchange="this.form.submit()">
+      <option value="">All Categories</option>
+      {% for cat in categories %}
+      <option value="{{ cat.id }}" {% if request.args.get('category')|string == cat.id|string %}selected{% endif %}>{{ cat.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  {% if current_user.role in ['technician', 'admin'] %}
+  <button class="btn btn-primary" onclick="openModal('addHardwareModal')">＋ Add Hardware</button>
+  {% endif %}
+</div>
+
+<!-- ========== TABLE ========== -->
+<div class="table-wrapper">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th data-sort="tag">Asset Tag</th>
+        <th data-sort="name">Name</th>
+        <th data-sort="manufacturer">Manufacturer</th>
+        <th data-sort="model">Model</th>
+        <th data-sort="category">Category</th>
+        <th data-sort="status">Status</th>
+        <th data-sort="assigned">Assigned To</th>
+        <th data-sort="location">Location</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for asset in assets.items %}
+      <tr class="clickable-row" onclick="window.location='{{ url_for('assets.hardware_detail', asset_id=asset.id) }}'">
+        <td><strong>{{ asset.asset_tag }}</strong></td>
+        <td>{{ asset.name }}</td>
+        <td class="text-muted">{{ asset.manufacturer or '—' }}</td>
+        <td class="text-muted">{{ asset.model or '—' }}</td>
+        <td>{{ asset.category.name if asset.category else '—' }}</td>
+        <td>
+          {% set status_class = asset.status|lower|replace(' ', '-') %}
+          <span class="badge badge-{{ status_class }}">{{ asset.status }}</span>
+        </td>
+        <td>{{ asset.assigned_to or '—' }}</td>
+        <td class="text-muted">{{ asset.location or '—' }}</td>
+      </tr>
+      {% endfor %}
+      {% if not assets.items %}
+      <tr>
+        <td colspan="8" class="text-muted" style="text-align:center;padding:32px;">
+          No hardware assets found
+        </td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ========== PAGINATION ========== -->
+{% if assets.pages > 1 %}
+<nav class="pagination">
+  {% if assets.has_prev %}
+  <a href="{{ url_for('assets.hardware_list', page=assets.prev_num, q=request.args.get('q',''), status=request.args.get('status',''), category=request.args.get('category','')) }}">‹ Prev</a>
+  {% else %}
+  <span class="disabled">‹ Prev</span>
+  {% endif %}
+
+  {% for page_num in assets.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=2) %}
+    {% if page_num %}
+      {% if page_num == assets.page %}
+      <span class="active">{{ page_num }}</span>
+      {% else %}
+      <a href="{{ url_for('assets.hardware_list', page=page_num, q=request.args.get('q',''), status=request.args.get('status',''), category=request.args.get('category','')) }}">{{ page_num }}</a>
+      {% endif %}
+    {% else %}
+      <span class="ellipsis">…</span>
+    {% endif %}
+  {% endfor %}
+
+  {% if assets.has_next %}
+  <a href="{{ url_for('assets.hardware_list', page=assets.next_num, q=request.args.get('q',''), status=request.args.get('status',''), category=request.args.get('category','')) }}">Next ›</a>
+  {% else %}
+  <span class="disabled">Next ›</span>
+  {% endif %}
+</nav>
+{% endif %}
+
+<!-- ========== ADD HARDWARE MODAL ========== -->
+{% if current_user.role in ['technician', 'admin'] %}
+<div class="modal-overlay" id="addHardwareModal">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModal('addHardwareModal')">&times;</button>
+    <h2>Add Hardware Asset</h2>
+
+    <form method="POST" action="{{ url_for('assets.hardware_add') }}" data-validate>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="hw_name">Name *</label>
+          <input type="text" id="hw_name" name="name" required>
+        </div>
+        <div class="form-group">
+          <label for="hw_manufacturer">Manufacturer</label>
+          <input type="text" id="hw_manufacturer" name="manufacturer">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="hw_model">Model</label>
+          <input type="text" id="hw_model" name="model">
+        </div>
+        <div class="form-group">
+          <label for="hw_serial">Serial Number</label>
+          <input type="text" id="hw_serial" name="serial_number">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="hw_category">Category</label>
+          <select id="hw_category" name="category_id">
+            <option value="">— Select —</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}">{{ cat.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="hw_status">Status</label>
+          <select id="hw_status" name="status">
+            <option value="In Stock">In Stock</option>
+            <option value="Deployed">Deployed</option>
+            <option value="In Repair">In Repair</option>
+            <option value="Retired">Retired</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="hw_assigned">Assigned To</label>
+        <input type="text" id="hw_assigned" name="assigned_to" placeholder="Employee name or username">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="hw_purchase_date">Purchase Date</label>
+          <input type="date" id="hw_purchase_date" name="purchase_date">
+        </div>
+        <div class="form-group">
+          <label for="hw_warranty">Warranty Expiry</label>
+          <input type="date" id="hw_warranty" name="warranty_expiry">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="hw_location">Location</label>
+        <input type="text" id="hw_location" name="location" placeholder="Building, room, desk…">
+      </div>
+
+      <div class="form-group">
+        <label for="hw_notes">Notes</label>
+        <textarea id="hw_notes" name="notes" rows="3" placeholder="Optional notes…"></textarea>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('addHardwareModal')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Hardware</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
