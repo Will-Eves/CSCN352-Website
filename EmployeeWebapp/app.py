@@ -110,7 +110,9 @@ def _seed_default_categories():
     db.session.commit()
 
 
-# ── Entry point ─────────────────────────────────────────────────────────
+# ── WSGI Application Instance ───────────────────────────────────────────
+# Expose module-level 'app' for WSGI servers (IIS HttpPlatformHandler, Waitress, WFastCGI)
+app = create_app()
 
 if __name__ == "__main__":
-    create_app().run(debug=True, port=5000)
+    app.run(debug=True, port=5000)
