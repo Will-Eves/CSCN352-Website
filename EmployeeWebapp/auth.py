@@ -3,10 +3,11 @@ LDAP authentication and Flask-Login initialisation for Rage N Raze.
 """
 
 import logging
+import ssl
 
 from flask import current_app
 from flask_login import LoginManager
-from ldap3 import ALL, Connection, Server
+from ldap3 import ALL, Connection, Server, NTLM, SIMPLE, Tls
 from ldap3.core.exceptions import LDAPException
 
 from models import User, db
@@ -42,8 +43,11 @@ DEV_USERS = {
 def authenticate_ldap(username: str, password: str) -> dict | None:
     """Authenticate a user against Active Directory via LDAP.
 
-    If ALLOW_LOCAL_DEV_LOGIN is enabled and dev credentials match,
-    authenticates locally for lab/testing environments without a live DC.
+    Supports:
+      - Windows NTLM authentication (solves 'strongerAuthRequired' over port 389)
+      - LDAPS (port 636) with certificate tolerance
+      - Standard SIMPLE bind fallback
+      - Local dev account fallback if ALLOW_LOCAL_DEV_LOGIN is enabled
 
     Returns a dict with keys ``username``, ``display_name``, ``email``, and
     ``role`` on success, or ``None`` on failure.
@@ -72,15 +76,28 @@ def authenticate_ldap(username: str, password: str) -> dict | None:
     clean_username = username.split("\\")[-1] if "\\" in username else username
     bind_dn = f"{ldap_domain}\\{clean_username}"
 
+    is_ssl = ldap_server.lower().startswith("ldaps://") or ":636" in ldap_server
+    tls_config = Tls(validate=ssl.CERT_NONE) if is_ssl else None
+
+    conn = None
+    server = Server(ldap_server, use_ssl=is_ssl, tls=tls_config, get_info=ALL)
+
+    # 1. First attempt Windows NTLM authentication (solves 'strongerAuthRequired')
     try:
-        server = Server(ldap_server, get_info=ALL)
-        conn = Connection(server, user=bind_dn, password=password, auto_bind=True)
-    except LDAPException as exc:
-        logger.error("LDAP bind failed for %s: %s", username, exc)
-        return None
-    except Exception as exc:  # noqa: BLE001 – catch-all for network errors
-        logger.error("LDAP connection error for %s: %s", username, exc)
-        return None
+        conn = Connection(server, user=bind_dn, password=password, authentication=NTLM, auto_bind=True)
+    except Exception as ntlm_err:
+        logger.debug("NTLM bind attempt notice for %s: %s", clean_username, ntlm_err)
+
+    # 2. Fall back to SIMPLE bind if NTLM was not accepted
+    if conn is None:
+        try:
+            conn = Connection(server, user=bind_dn, password=password, authentication=SIMPLE, auto_bind=True)
+        except LDAPException as exc:
+            logger.error("LDAP bind failed for %s: %s", clean_username, exc)
+            return None
+        except Exception as exc:  # noqa: BLE001 – catch-all for network errors
+            logger.error("LDAP connection error for %s: %s", clean_username, exc)
+            return None
 
     try:
         # Search for the authenticated user's attributes
@@ -138,7 +155,7 @@ def authenticate_ldap(username: str, password: str) -> dict | None:
         }
 
     except LDAPException as exc:
-        logger.error("LDAP search error for %s: %s", username, exc)
+        logger.error("LDAP search error for %s: %s", clean_username, exc)
         try:
             conn.unbind()
         except Exception:  # noqa: BLE001

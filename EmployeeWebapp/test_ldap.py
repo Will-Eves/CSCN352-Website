@@ -12,6 +12,7 @@ Usage:
 import sys
 import os
 import socket
+import ssl
 import argparse
 import getpass
 
@@ -20,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import Config
 
 try:
-    from ldap3 import Server, Connection, ALL, SUBTREE
+    from ldap3 import Server, Connection, ALL, SUBTREE, NTLM, SIMPLE, Tls
     from ldap3.core.exceptions import LDAPException, LDAPSocketOpenError, LDAPBindError
 except ImportError:
     print("[ERROR] ldap3 is not installed. Run: pip install ldap3")
@@ -62,32 +63,47 @@ def test_tcp_connectivity(host: str, port: int) -> bool:
 def test_ldap_bind(server_uri: str, domain: str, username: str, password: str):
     print(f"\n[2/4] Testing LDAP bind for user '{domain}\\{username}' ...")
     bind_dn = f"{domain}\\{username}"
-    
+    is_ssl = server_uri.lower().startswith("ldaps://") or ":636" in server_uri
+    tls_config = Tls(validate=ssl.CERT_NONE) if is_ssl else None
+
+    # Try NTLM first (Windows Active Directory standard)
+    print("  -> Attempting NTLM authentication (Windows challenge-response)...")
     try:
-        server = Server(server_uri, get_info=ALL)
-        conn = Connection(server, user=bind_dn, password=password, auto_bind=True)
-        print(f"  [OK] LDAP Bind Successful! Authenticated as: {bind_dn}")
+        server = Server(server_uri, use_ssl=is_ssl, tls=tls_config, get_info=ALL)
+        conn = Connection(server, user=bind_dn, password=password, authentication=NTLM, auto_bind=True)
+        print(f"  [OK] NTLM LDAP Bind Successful! Authenticated as: {bind_dn}")
+        return conn, server
+    except LDAPBindError as e:
+        print(f"  [INFO] NTLM bind did not succeed: {e}")
+    except Exception as e:
+        print(f"  [INFO] NTLM connection notice: {e}")
+
+    # Fallback to SIMPLE bind
+    print("  -> Attempting SIMPLE authentication...")
+    try:
+        server = Server(server_uri, use_ssl=is_ssl, tls=tls_config, get_info=ALL)
+        conn = Connection(server, user=bind_dn, password=password, authentication=SIMPLE, auto_bind=True)
+        print(f"  [OK] SIMPLE LDAP Bind Successful! Authenticated as: {bind_dn}")
         return conn, server
     except LDAPBindError as e:
         print(f"  [FAIL] LDAP Bind Error: {e}")
         err_str = str(e)
-        if "data 52e" in err_str:
-            print("  --> HINT (52e): Invalid credentials (wrong password or username).")
+        if "strongerAuthRequired" in err_str:
+            print("\n  [CRITICAL] 'strongerAuthRequired' detected!")
+            print("  Active Directory is blocking unencrypted simple binds over port 389.")
+            print("  Solutions:")
+            print("    1. Use NTLM authentication (updated in this script and auth.py).")
+            print("    2. Or connect using LDAPS over port 636: ldaps://<ip>:636")
+        elif "data 52e" in err_str or "invalidCredentials" in err_str:
+            print("  --> HINT: Invalid credentials (wrong password, or domain name does not match).")
         elif "data 525" in err_str:
-            print("  --> HINT (525): User not found in domain.")
+            print("  --> HINT: User not found in domain.")
         elif "data 532" in err_str:
-            print("  --> HINT (532): Password has expired.")
+            print("  --> HINT: Password has expired.")
         elif "data 533" in err_str:
-            print("  --> HINT (533): User account is disabled.")
-        elif "data 701" in err_str:
-            print("  --> HINT (701): Account expired.")
+            print("  --> HINT: User account is disabled.")
         elif "data 775" in err_str:
-            print("  --> HINT (775): User account is locked out.")
-        else:
-            print(f"  --> Check if domain '{domain}' matches your NetBIOS domain name.")
-        return None, None
-    except LDAPSocketOpenError as e:
-        print(f"  [FAIL] Socket open error: {e}")
+            print("  --> HINT: User account is locked out.")
         return None, None
     except Exception as e:
         print(f"  [FAIL] Unexpected error during bind: {e}")
@@ -107,11 +123,20 @@ def test_user_search(conn, search_base: str, username: str, admin_grp: str, tech
         )
 
         if not conn.entries:
-            print(f"  [WARN] User '{username}' was authenticated, but no entry was found under search base:")
-            print(f"         '{search_base}'")
-            print("  --> HINT: If your users are in the default Active Directory container,")
-            print("      the search base is usually 'CN=Users,DC=...' (not 'OU=Users,...'),")
-            print("      or you can set LDAP_USER_SEARCH_BASE to the domain root (e.g. 'DC=rnr,DC=local').")
+            print(f"  [WARN] User '{username}' authenticated, but search returned 0 results in: '{search_base}'")
+            # Try searching the base domain root
+            domain_root = ",".join([part for part in search_base.split(",") if part.upper().startswith("DC=")])
+            if domain_root and domain_root != search_base:
+                print(f"  -> Retrying search at domain root '{domain_root}' ...")
+                conn.search(
+                    search_base=domain_root,
+                    search_filter=search_filter,
+                    search_scope=SUBTREE,
+                    attributes=["displayName", "mail", "sAMAccountName", "memberOf", "distinguishedName"],
+                )
+
+        if not conn.entries:
+            print("  [WARN] No user object found. User will default to 'viewer' role upon login.")
             return
 
         entry = conn.entries[0]
