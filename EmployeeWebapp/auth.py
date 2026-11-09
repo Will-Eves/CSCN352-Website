@@ -62,12 +62,15 @@ def authenticate_ldap(username: str, password: str) -> dict | None:
 
     ldap_server = current_app.config["LDAP_SERVER"]
     ldap_domain = current_app.config["LDAP_DOMAIN"]
+    ldap_base_dn = current_app.config["LDAP_BASE_DN"]
     ldap_search_base = current_app.config["LDAP_USER_SEARCH_BASE"]
     admin_group = current_app.config["LDAP_ADMIN_GROUP"]
     tech_group = current_app.config["LDAP_TECH_GROUP"]
     viewer_group = current_app.config["LDAP_VIEWER_GROUP"]
 
-    bind_dn = f"{ldap_domain}\\{username}"
+    # Support both "DOMAIN\username" and simple "username"
+    clean_username = username.split("\\")[-1] if "\\" in username else username
+    bind_dn = f"{ldap_domain}\\{clean_username}"
 
     try:
         server = Server(ldap_server, get_info=ALL)
@@ -81,20 +84,34 @@ def authenticate_ldap(username: str, password: str) -> dict | None:
 
     try:
         # Search for the authenticated user's attributes
-        search_filter = f"(sAMAccountName={username})"
+        search_filter = f"(sAMAccountName={clean_username})"
         conn.search(
             search_base=ldap_search_base,
             search_filter=search_filter,
             attributes=["displayName", "mail", "memberOf"],
         )
 
+        # Fallback to searching the broader domain root if not in specific OU
+        if not conn.entries and ldap_base_dn and ldap_base_dn != ldap_search_base:
+            conn.search(
+                search_base=ldap_base_dn,
+                search_filter=search_filter,
+                attributes=["displayName", "mail", "memberOf"],
+            )
+
         if not conn.entries:
-            logger.warning("LDAP search returned no entries for %s", username)
+            # User authenticated successfully via bind, but search didn't find attributes
+            logger.warning("LDAP user %s authenticated, but search returned no entry", clean_username)
             conn.unbind()
-            return None
+            return {
+                "username": clean_username,
+                "display_name": clean_username,
+                "email": "",
+                "role": "viewer",
+            }
 
         entry = conn.entries[0]
-        display_name = str(entry.displayName) if hasattr(entry, "displayName") and entry.displayName else username
+        display_name = str(entry.displayName) if hasattr(entry, "displayName") and entry.displayName else clean_username
         email = str(entry.mail) if hasattr(entry, "mail") and entry.mail else ""
 
         # Determine role from group membership
@@ -114,7 +131,7 @@ def authenticate_ldap(username: str, password: str) -> dict | None:
         conn.unbind()
 
         return {
-            "username": username,
+            "username": clean_username,
             "display_name": display_name,
             "email": email,
             "role": role,
