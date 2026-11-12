@@ -6,6 +6,7 @@ Application factory and entry point.
 import os
 
 from flask import Flask
+from sqlalchemy import inspect, text
 
 from auth import init_login_manager
 from config import Config
@@ -41,6 +42,14 @@ def create_app() -> Flask:
     # ── Database & Seed Data ────────────────────────────────────────────
     with app.app_context():
         db.create_all()
+        user_columns = {
+            column["name"] for column in inspect(db.engine).get_columns("users")
+        }
+        if "password_hash" not in user_columns:
+            db.session.execute(
+                text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)")
+            )
+            db.session.commit()
         _seed_default_categories()
 
     # ── Template Context Processor ──────────────────────────────────────

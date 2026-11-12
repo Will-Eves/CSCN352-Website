@@ -6,6 +6,7 @@ import sys
 import unittest
 from datetime import date
 from flask import url_for
+from werkzeug.security import check_password_hash
 from app import create_app
 from models import db, User, Category, HardwareAsset, SoftwareAsset, AuditLog
 
@@ -125,6 +126,54 @@ class AssetManagementTestCase(unittest.TestCase):
         self.logout()
 
     def test_admin_full_workflow(self):
+        self.login("admin", "admin123")
+
+        # Create a local webapp user
+        resp = self.client.post("/admin/users/add", data={
+            "username": "jsmith",
+            "display_name": "Jordan Smith",
+            "email": "jsmith@example.com",
+            "role": "technician",
+            "password": "securepass123",
+            "password_confirm": "securepass123",
+        }, follow_redirects=True)
+        self.assertIn(b"has been added.", resp.data)
+        with self.app.app_context():
+            local_user = User.query.filter_by(username="jsmith").first()
+            self.assertIsNotNone(local_user)
+            self.assertEqual(local_user.role, "technician")
+            self.assertTrue(check_password_hash(local_user.password_hash, "securepass123"))
+            self.assertNotEqual(local_user.password_hash, "securepass123")
+
+        # Duplicate usernames are rejected case-insensitively
+        resp = self.client.post("/admin/users/add", data={
+            "username": "JSMITH",
+            "role": "viewer",
+            "password": "securepass123",
+            "password_confirm": "securepass123",
+        }, follow_redirects=True)
+        self.assertIn(b"already registered", resp.data)
+        with self.app.app_context():
+            self.assertEqual(User.query.filter(
+                db.func.lower(User.username) == "jsmith"
+            ).count(), 1)
+
+        resp = self.client.post("/admin/users/add", data={
+            "username": "mismatch",
+            "role": "viewer",
+            "password": "securepass123",
+            "password_confirm": "differentpass",
+        }, follow_redirects=True)
+        self.assertIn(b"Passwords do not match", resp.data)
+        with self.app.app_context():
+            self.assertIsNone(User.query.filter_by(username="mismatch").first())
+
+        self.logout()
+        resp = self.login("jsmith", "securepass123")
+        self.assertIn(b"Welcome back, Jordan Smith", resp.data)
+        self.logout()
+        resp = self.login("jsmith", "wrongpass123")
+        self.assertIn(b"Invalid credentials", resp.data)
         self.login("admin", "admin123")
 
         # 1. Add Hardware

@@ -39,6 +39,9 @@ The application strictly follows the brand guidelines defined in the repository 
   - Admins can add new hardware and software categories
   - Edit existing category names and descriptions
   - Soft-delete or toggle active/inactive status
+- **Admin User Management:**
+  - Admins can create webapp accounts with a username, password, and role
+  - Passwords are stored as hashes; these accounts work only in the webapp and do not create Windows or Active Directory accounts
 - **Role-Based Access Control (RBAC):**
   - **Viewer:** Read-only access to inventory and dashboards
   - **Technician:** Read-only + add and edit hardware and software assets
@@ -118,7 +121,7 @@ EmployeeWebapp/
 ├── test_app.py             # Automated unit and integration test suite
 ├── routes/
 │   ├── __init__.py
-│   ├── admin.py            # User management & role assignment (/admin)
+│   ├── admin.py            # User creation, management & role assignment (/admin)
 │   ├── assets.py           # Hardware & software CRUD, search, filter (/hardware, /software)
 │   ├── categories.py       # Category creation, editing & toggles (/categories)
 │   ├── decorators.py       # @role_required RBAC decorator

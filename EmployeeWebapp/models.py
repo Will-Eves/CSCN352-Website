@@ -15,7 +15,7 @@ db = SQLAlchemy()
 # User
 # ---------------------------------------------------------------------------
 class User(UserMixin, db.Model):
-    """Application user, synced from Active Directory on login."""
+    """Application user, authenticated locally or synced from Active Directory."""
 
     __tablename__ = "users"
 
@@ -24,6 +24,7 @@ class User(UserMixin, db.Model):
     display_name = db.Column(db.String(250))
     email = db.Column(db.String(250))
     role = db.Column(db.String(20), nullable=False, default="viewer")  # admin | technician | viewer
+    password_hash = db.Column(db.String(255))
     is_active = db.Column(db.Boolean, default=True)
     last_login = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

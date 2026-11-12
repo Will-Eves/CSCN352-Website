@@ -12,6 +12,8 @@ apply_md4_patch()
 
 from flask import current_app
 from flask_login import LoginManager
+from werkzeug.security import check_password_hash
+
 from models import User, db
 
 logger = logging.getLogger(__name__)
@@ -121,14 +123,28 @@ def authenticate_windows_native(domain: str, username: str, password: str, admin
 
 
 def authenticate_ldap(username: str, password: str) -> dict | None:
-    """Authenticate a user against Active Directory.
+    """Authenticate a local webapp account or an Active Directory user.
 
     Checks:
-      1. Local dev fallback accounts (if ALLOW_LOCAL_DEV_LOGIN is enabled)
-      2. Windows Native LogonUserW (bypasses port 389/636 signing on Windows Server)
-      3. Standard LDAP3 bind (NTLM / SIMPLE / LDAPS)
+      1. Local webapp accounts stored in the database
+      2. Local dev fallback accounts (if ALLOW_LOCAL_DEV_LOGIN is enabled)
+      3. Windows Native LogonUserW (bypasses port 389/636 signing on Windows Server)
+      4. Standard LDAP3 bind (NTLM / SIMPLE / LDAPS)
     """
-    # 1. Check local dev accounts first if enabled
+    local_user = User.query.filter(
+        db.func.lower(User.username) == username.lower().strip()
+    ).first()
+    if local_user is not None and local_user.password_hash:
+        if not check_password_hash(local_user.password_hash, password):
+            return None
+        return {
+            "username": local_user.username,
+            "display_name": local_user.display_name or local_user.username,
+            "email": local_user.email or "",
+            "role": local_user.role,
+        }
+
+    # Check local dev accounts first if enabled
     if current_app.config.get("ALLOW_LOCAL_DEV_LOGIN", False):
         user_key = username.lower().strip()
         if user_key in DEV_USERS and DEV_USERS[user_key]["password"] == password:

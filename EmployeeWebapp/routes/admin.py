@@ -4,6 +4,7 @@ Admin routes — user management and role assignment.
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
+from werkzeug.security import generate_password_hash
 
 from models import User, db, log_action
 from routes.decorators import role_required
@@ -18,6 +19,63 @@ def admin_panel():
     """List all users with their roles."""
     users = User.query.order_by(User.username).all()
     return render_template("admin.html", users=users)
+
+
+@admin_bp.route("/users/add", methods=["POST"])
+@login_required
+@role_required("admin")
+def add_user():
+    """Create a local webapp account."""
+    username = request.form.get("username", "").strip()
+    display_name = request.form.get("display_name", "").strip()
+    email = request.form.get("email", "").strip()
+    password = request.form.get("password", "")
+    password_confirm = request.form.get("password_confirm", "")
+    role = request.form.get("role", "viewer").strip()
+
+    if not username or len(username) > 150:
+        flash("Enter a username no longer than 150 characters.", "warning")
+        return redirect(url_for("admin_bp.admin_panel"))
+
+    existing_user = User.query.filter(
+        db.func.lower(User.username) == username.lower()
+    ).first()
+    if existing_user is not None:
+        flash(f"User '{existing_user.username}' is already registered.", "warning")
+        return redirect(url_for("admin_bp.admin_panel"))
+
+    if len(display_name) > 250 or len(email) > 250:
+        flash("Name and email must be no longer than 250 characters.", "warning")
+        return redirect(url_for("admin_bp.admin_panel"))
+    if len(password) < 8:
+        flash("Password must be at least 8 characters.", "warning")
+        return redirect(url_for("admin_bp.admin_panel"))
+    if password != password_confirm:
+        flash("Passwords do not match.", "warning")
+        return redirect(url_for("admin_bp.admin_panel"))
+    if role not in ("admin", "technician", "viewer"):
+        flash("Select a valid role.", "warning")
+        return redirect(url_for("admin_bp.admin_panel"))
+
+    user = User(
+        username=username,
+        display_name=display_name or username,
+        email=email or None,
+        role=role,
+        password_hash=generate_password_hash(password),
+    )
+    db.session.add(user)
+    db.session.commit()
+
+    log_action(
+        current_user.username,
+        "CREATE",
+        "user",
+        user.id,
+        {"username": username, "role": role, "account_type": "local"},
+    )
+    flash(f"User '{username}' has been added.", "success")
+    return redirect(url_for("admin_bp.admin_panel"))
 
 
 @admin_bp.route("/users/<int:user_id>/role", methods=["POST"])
